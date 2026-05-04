@@ -4,119 +4,115 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useMarketData } from '../hooks/useMarketData';
+import { getThaiSession } from '../lib/strategy'; // เพิ่มตัวนี้เพื่อแก้ Error
 
 const Chart = dynamic(() => import('../components/Chart'), { ssr: false });
 
 export default function Home() {
-  const { candles, signals, stats, session } = useMarketData();
+  const { candles, signals, stats } = useMarketData();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
+
+  // ดึง Session ปัจจุบันตามเวลาไทยจริง
+  const currentThaiSession = getThaiSession(Math.floor(Date.now() / 1000));
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-6 font-sans">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* Header - เปลี่ยนเป็นชื่อคุณสุดเท่ */}
-        <header className="flex flex-col md:flex-row justify-between items-center bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 backdrop-blur-sm shadow-xl">
+        <header className="flex flex-col md:flex-row justify-between items-center bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 backdrop-blur-md shadow-2xl">
           <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-black tracking-tighter bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent italic">
               BRIGHT TRADE SIGNAL
             </h1>
-            <p className="text-sm text-zinc-400 mt-2 font-medium tracking-wide">
-              Advanced ICT Algorithm • {session}
-            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <p className="text-sm font-bold text-zinc-300">
+                Current Status: <span className="text-emerald-400">{currentThaiSession}</span>
+              </p>
+            </div>
           </div>
           
-          <div className="flex gap-4 mt-4 md:mt-0">
-            <div className="bg-zinc-900/80 px-5 py-2 rounded-xl border border-zinc-800 text-center shadow-inner">
-              <p className="text-xs text-zinc-500 font-semibold mb-1">WIN RATE</p>
-              <p className="text-xl font-bold text-emerald-400">{stats.winrate}%</p>
-            </div>
-            <div className="bg-zinc-900/80 px-5 py-2 rounded-xl border border-zinc-800 text-center shadow-inner">
-              <p className="text-xs text-zinc-500 font-semibold mb-1">TRADES</p>
-              <p className="text-xl font-bold text-cyan-400">{stats.totalTrades}</p>
-            </div>
+          <div className="flex gap-4 mt-6 md:mt-0">
+             <div className="bg-black/40 border border-zinc-800 p-4 rounded-xl text-center min-w-[100px]">
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Accuracy</p>
+                <p className="text-2xl font-black text-emerald-400">{stats.winrate}%</p>
+             </div>
+             <div className="bg-black/40 border border-zinc-800 p-4 rounded-xl text-center min-w-[100px]">
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Total Trades</p>
+                <p className="text-2xl font-black text-cyan-400">{stats.totalTrades}</p>
+             </div>
           </div>
         </header>
 
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-2 bg-zinc-900/40 p-1.5 rounded-xl border border-zinc-800 w-fit">
+        <div className="flex bg-zinc-900/80 p-1.5 rounded-xl border border-zinc-800 w-fit gap-2">
           <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${activeTab === 'dashboard' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            onClick={() => setActiveTab('dashboard')} 
+            className={`px-8 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'dashboard' ? 'bg-zinc-700 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            📊 กราฟ & สัญญาณเทรด (Dashboard)
+            LIVE CHART
           </button>
           <button 
-            onClick={() => setActiveTab('history')}
-            className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${activeTab === 'history' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            onClick={() => setActiveTab('history')} 
+            className={`px-8 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'history' ? 'bg-zinc-700 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            📜 ประวัติออเดอร์ (Order History)
+            ORDER HISTORY
           </button>
-        </nav>
+        </div>
 
-        {/* Content Area */}
         {activeTab === 'dashboard' ? (
-          // แท็บกราฟ
-          <div className="h-[60vh] md:h-[70vh] w-full rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl relative">
-             <Chart candles={candles} signals={signals} />
+          <div className="h-[65vh] rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl relative">
+            <Chart candles={candles} signals={signals} />
           </div>
         ) : (
-          // แท็บประวัติออเดอร์
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden backdrop-blur-sm shadow-xl">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="uppercase tracking-wider border-b border-zinc-800 bg-zinc-900">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-900/80 text-zinc-500 uppercase tracking-widest border-b border-zinc-800">
                   <tr>
-                    <th className="px-6 py-4 font-medium text-zinc-400">เวลา (Time)</th>
-                    <th className="px-6 py-4 font-medium text-zinc-400">ประเภท (Type)</th>
-                    <th className="px-6 py-4 font-medium text-zinc-400">ราคาเข้า (Entry)</th>
-                    <th className="px-6 py-4 font-medium text-zinc-400">TP / SL</th>
-                    <th className="px-6 py-4 font-medium text-zinc-400">เหตุผลวิเคราะห์ (ICT Context)</th>
+                    <th className="p-5">Time (BKK)</th>
+                    <th className="p-5">Side</th>
+                    <th className="p-5">Outcome</th>
+                    <th className="p-5">Price Levels</th>
+                    <th className="p-5">ICT Analysis</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
-                  {signals.length > 0 ? (
-                    // นำออเดอร์ล่าสุดขึ้นก่อน (reverse)
-                    [...signals].reverse().map((signal, idx) => (
-                      <tr key={idx} className="hover:bg-zinc-800/30 transition-colors">
-                        <td className="px-6 py-4 text-zinc-300">
-                          {new Date((signal.time as number) * 1000).toLocaleString('th-TH', { 
-                            dateStyle: 'short', timeStyle: 'short' 
-                          })}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                            signal.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
-                            'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          }`}>
-                            {signal.type}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 font-mono text-zinc-200">
-                          {signal.price.toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 font-mono">
-                          <span className="text-emerald-400 mr-2">TP: {signal.tp.toFixed(2)}</span>
-                          <span className="text-rose-400">SL: {signal.sl.toFixed(2)}</span>
-                        </td>
-                        <td className="px-6 py-4 text-zinc-400 max-w-md truncate whitespace-normal">
-                          {signal.reason}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">
-                        ยังไม่มีสัญญาณเทรดในขณะนี้ กำลังรอการกวาด Liquidity...
+                  {[...signals].reverse().map((s, i) => (
+                    <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
+                      <td className="p-5 text-zinc-400 font-medium">
+                        {new Date(s.time * 1000).toLocaleString('th-TH', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short'})}
                       </td>
+                      <td className="p-5">
+                        <span className={`px-3 py-1 rounded-full font-black text-[10px] border ${
+                          s.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        }`}>{s.type}</span>
+                      </td>
+                      <td className="p-5">
+                        <span className={`px-2.5 py-1 rounded font-black text-[9px] ${
+                          s.result === 'WIN' ? 'bg-emerald-500/20 text-emerald-400' : 
+                          s.result === 'LOSS' ? 'bg-rose-500/20 text-rose-400' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          {s.result}
+                        </span>
+                      </td>
+                      <td className="p-5 font-mono">
+                        <div className="text-zinc-200 font-bold underline decoration-zinc-700">Entry: {s.price.toFixed(2)}</div>
+                        <div className="text-[10px] mt-1 space-x-2">
+                           <span className="text-emerald-500/70">TP: {s.tp.toFixed(2)}</span>
+                           <span className="text-rose-500/70">SL: {s.sl.toFixed(2)}</span>
+                        </div>
+                      </td>
+                      <td className="p-5 text-zinc-400 italic leading-relaxed max-w-xs">{s.reason}</td>
                     </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
