@@ -1,5 +1,5 @@
 // hooks/useMarketData.ts
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { runStrategy, getThaiSession, Candle, Signal } from '../lib/strategy';
 
 export function useMarketData() {
@@ -7,71 +7,75 @@ export function useMarketData() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [session, setSession] = useState<string>('');
   const [stats, setStats] = useState({ winrate: 0, totalTrades: 0 });
-  
-  // ใช้ Ref เพื่อเก็บค่าล่าสุดโดยไม่ทำให้ Component Re-render บ่อยเกินไป
-  const lastUpdateRef = useRef<number>(0);
 
-  const updateMarket = async (isFullLoad: boolean) => {
-    try {
-      // 1. จำลองการดึงข้อมูล (ในโปรเจกต์จริงคุณไบร์ทเปลี่ยนตรงนี้เป็น fetch จาก API เช่น TwelveData หรือ Binance)
-      // เทคนิค: ถ้าไม่ใช่ Full Load ให้ดึงแค่ราคา Tick ล่าสุดมาแปะท้าย
-      const now = Math.floor(Date.now() / 1000);
+  // ฟังก์ชันสร้างกราฟให้ดูสมจริง (เหมือนราคาวิ่งจริง)
+  const generateRealisticData = (count: number, lastPrice: number) => {
+    let currentPrice = lastPrice;
+    const data: Candle[] = [];
+    const now = Math.floor(Date.now() / 1000);
+    
+    for (let i = 0; i < count; i++) {
+      const open = currentPrice;
+      const change = (Math.random() - 0.5) * 5; // ราคาวิ่งขึ้นลงไม่เกิน 5 จุด
+      const close = open + change;
+      const high = Math.max(open, close) + Math.random() * 2;
+      const low = Math.min(open, close) - Math.random() * 2;
       
+      data.push({
+        time: now - (count - i) * 300,
+        open, high, low, close
+      });
+      currentPrice = close;
+    }
+    return data;
+  };
+
+  const updateMarket = (isFullLoad: boolean) => {
+    setCandles(prev => {
       let newCandles: Candle[] = [];
       
-      if (isFullLoad || candles.length === 0) {
-        // โหลดข้อมูลชุดใหญ่ (History)
-        newCandles = Array.from({ length: 150 }, (_, i) => ({
-          time: now - (150 - i) * 300,
-          open: 2300 + Math.random() * 15,
-          high: 2320 + Math.random() * 15,
-          low: 2280 + Math.random() * 15,
-          close: 2300 + Math.random() * 15,
-        }));
+      if (isFullLoad || prev.length === 0) {
+        // สร้างข้อมูลใหม่ 100 แท่งแรกให้ดูเป็นเทรนด์
+        newCandles = generateRealisticData(100, 2300);
       } else {
-        // อัปเดตเฉพาะแท่งปัจจุบัน (Real-time Tick)
-        newCandles = [...candles];
-        const lastCandle = { ...newCandles[newCandles.length - 1] };
-        lastCandle.close = lastCandle.close + (Math.random() - 0.5) * 2; // ขยับราคาล่าสุด
-        lastCandle.high = Math.max(lastCandle.high, lastCandle.close);
-        lastCandle.low = Math.min(lastCandle.low, lastCandle.close);
-        newCandles[newCandles.length - 1] = lastCandle;
+        // อัปเดตเฉพาะแท่งปัจจุบันให้ราคาขยับแบบเรียลไทม์
+        newCandles = [...prev];
+        const lastIndex = newCandles.length - 1;
+        const last = { ...newCandles[lastIndex] };
+        
+        // ขยับราคา Close ทีละนิด (ไม่สุ่มกระโดดเหมือนของเก่า)
+        const move = (Math.random() - 0.5) * 0.5;
+        last.close += move;
+        last.high = Math.max(last.high, last.close);
+        last.low = Math.min(last.low, last.close);
+        
+        newCandles[lastIndex] = last;
       }
 
-      // 2. รันกลยุทธ์ ICT A+++ Setup
+      // คำนวณสัญญาณและ Session ตามเวลาไทย
       const calculatedSignals = runStrategy(newCandles);
-      const currentSession = getThaiSession(now);
-
-      // 3. คำนวณสถิติ Win Rate
+      setSignals(calculatedSignals);
+      
       const wins = calculatedSignals.filter(s => s.result === 'WIN').length;
       const total = calculatedSignals.length;
-
-      setCandles(newCandles);
-      setSignals(calculatedSignals);
-      setSession(currentSession);
       setStats({
         totalTrades: total,
         winrate: total > 0 ? parseFloat(((wins / total) * 100).toFixed(1)) : 0
       });
-      
-    } catch (error) {
-      console.error("Update failed:", error);
-    }
+
+      return newCandles;
+    });
+    
+    setSession(getThaiSession(Math.floor(Date.now() / 1000)));
   };
 
   useEffect(() => {
-    // โหลดครั้งแรกแบบจัดเต็ม
     updateMarket(true);
-
-    // Set 1: อัปเดตราคาทุก 5 วินาที (Fast Tick) - ไม่ติดลิมิตแน่นอนเพราะไม่ได้โหลด History ใหม่
-    const quickInterval = setInterval(() => updateMarket(false), 5000);
-
-    // Set 2: รีเฟรชฐานข้อมูลชุดใหญ่ทุก 5 นาที
-    const fullRefreshInterval = setInterval(() => updateMarket(true), 300000);
-
+    const quickInterval = setInterval(() => updateMarket(false), 2000); // อัปเดตราคาไหลลื่นทุก 2 วินาที
+    const fullRefresh = setInterval(() => updateMarket(true), 300000); // รีเซ็ตกราฟทุก 5 นาที
     return () => {
       clearInterval(quickInterval);
-      clearInterval(fullRefreshInterval);
+      clearInterval(fullRefresh);
     };
   }, []);
 
