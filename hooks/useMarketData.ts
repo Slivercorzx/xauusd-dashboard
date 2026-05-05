@@ -22,27 +22,24 @@ export function useMarketData() {
     try {
       const currentKey = API_KEYS[currentKeyIndex.current];
       
-      // บังคับ timezone เป็น Asia/Bangkok
+      // อัปเดต: ดึงข้อมูลแค่ 300 แท่ง (เพียงพอสำหรับคำนวณ EMA 200 และประหยัด API)
       const response = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${SYMBOL}&interval=${INTERVAL}&outputsize=100&apikey=${currentKey}&timezone=Asia/Bangkok`
+        `https://api.twelvedata.com/time_series?symbol=${SYMBOL}&interval=${INTERVAL}&outputsize=300&apikey=${currentKey}&timezone=Asia/Bangkok`
       );
       
       const data = await response.json();
 
       if (data.status === 'error') {
-        console.warn(`⚠️ API Key ตัวที่ ${currentKeyIndex.current + 1} ติดปัญหา -> สลับคีย์...`);
+        console.warn(`⚠️ API Key ติดปัญหา -> สลับคีย์...`);
         currentKeyIndex.current = (currentKeyIndex.current + 1) % API_KEYS.length;
         return; 
       }
 
       if (data.values && data.values.length > 0) {
         const formattedCandles: Candle[] = data.values.reverse().map((v: any) => {
-          // แปลงสตริงเวลาที่ได้มาเป็นโซนไทยแบบสมบูรณ์ (+07:00) เพื่อให้กราฟแสดงแกน X ตรงเป๊ะ
           const thaiTimeStr = v.datetime.replace(' ', 'T') + '+07:00';
-          const exactTimestamp = new Date(thaiTimeStr).getTime() / 1000;
-
           return {
-            time: exactTimestamp,
+            time: new Date(thaiTimeStr).getTime() / 1000,
             open: parseFloat(v.open),
             high: parseFloat(v.high),
             low: parseFloat(v.low),
@@ -65,13 +62,12 @@ export function useMarketData() {
         });
       }
     } catch (error) {
-      console.error("Failed to fetch market data:", error);
+      console.error("Failed to fetch data:", error);
     }
   };
 
   useEffect(() => {
     fetchRealData(); 
-    // อัปเดตทุกๆ 15 วินาที
     const interval = setInterval(fetchRealData, 15000); 
     return () => clearInterval(interval);
   }, []);
