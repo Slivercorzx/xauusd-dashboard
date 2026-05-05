@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useMarketData } from '../hooks/useMarketData';
-import { getThaiSession } from '../lib/strategy'; // เพิ่มตัวนี้เพื่อแก้ Error
+import { getThaiSession } from '../lib/strategy';
 
 const Chart = dynamic(() => import('../components/Chart'), { ssr: false });
 
@@ -12,7 +12,6 @@ export default function Home() {
   const { candles, signals, stats } = useMarketData();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
 
-  // ดึง Session ปัจจุบันตามเวลาไทยจริง
   const currentThaiSession = getThaiSession(Math.floor(Date.now() / 1000));
 
   return (

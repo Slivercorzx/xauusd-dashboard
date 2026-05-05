@@ -1,5 +1,5 @@
 // hooks/useMarketData.ts
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { runStrategy, getThaiSession, Candle, Signal } from '../lib/strategy';
 
 export function useMarketData() {
@@ -8,75 +8,72 @@ export function useMarketData() {
   const [session, setSession] = useState<string>('');
   const [stats, setStats] = useState({ winrate: 0, totalTrades: 0 });
 
-  // ฟังก์ชันสร้างกราฟให้ดูสมจริง (เหมือนราคาวิ่งจริง)
-  const generateRealisticData = (count: number, lastPrice: number) => {
-    let currentPrice = lastPrice;
-    const data: Candle[] = [];
-    const now = Math.floor(Date.now() / 1000);
-    
-    for (let i = 0; i < count; i++) {
-      const open = currentPrice;
-      const change = (Math.random() - 0.5) * 5; // ราคาวิ่งขึ้นลงไม่เกิน 5 จุด
-      const close = open + change;
-      const high = Math.max(open, close) + Math.random() * 2;
-      const low = Math.min(open, close) - Math.random() * 2;
-      
-      data.push({
-        time: now - (count - i) * 300,
-        open, high, low, close
-      });
-      currentPrice = close;
-    }
-    return data;
-  };
+  const API_KEYS = [
+    '38120619b69b4fc6af525768b0da4b72',
+    '79996916dc9d45cbb3b97e10fc25a1b1',
+    '650c6bef38664fe89c486ba99fb10b14'
+  ];
+  
+  const currentKeyIndex = useRef(0);
+  const SYMBOL = 'XAU/USD';
+  const INTERVAL = '5min';
 
-  const updateMarket = (isFullLoad: boolean) => {
-    setCandles(prev => {
-      let newCandles: Candle[] = [];
+  const fetchRealData = async () => {
+    try {
+      const currentKey = API_KEYS[currentKeyIndex.current];
       
-      if (isFullLoad || prev.length === 0) {
-        // สร้างข้อมูลใหม่ 100 แท่งแรกให้ดูเป็นเทรนด์
-        newCandles = generateRealisticData(100, 2300);
-      } else {
-        // อัปเดตเฉพาะแท่งปัจจุบันให้ราคาขยับแบบเรียลไทม์
-        newCandles = [...prev];
-        const lastIndex = newCandles.length - 1;
-        const last = { ...newCandles[lastIndex] };
-        
-        // ขยับราคา Close ทีละนิด (ไม่สุ่มกระโดดเหมือนของเก่า)
-        const move = (Math.random() - 0.5) * 0.5;
-        last.close += move;
-        last.high = Math.max(last.high, last.close);
-        last.low = Math.min(last.low, last.close);
-        
-        newCandles[lastIndex] = last;
+      // บังคับ timezone เป็น Asia/Bangkok
+      const response = await fetch(
+        `https://api.twelvedata.com/time_series?symbol=${SYMBOL}&interval=${INTERVAL}&outputsize=100&apikey=${currentKey}&timezone=Asia/Bangkok`
+      );
+      
+      const data = await response.json();
+
+      if (data.status === 'error') {
+        console.warn(`⚠️ API Key ตัวที่ ${currentKeyIndex.current + 1} ติดปัญหา -> สลับคีย์...`);
+        currentKeyIndex.current = (currentKeyIndex.current + 1) % API_KEYS.length;
+        return; 
       }
 
-      // คำนวณสัญญาณและ Session ตามเวลาไทย
-      const calculatedSignals = runStrategy(newCandles);
-      setSignals(calculatedSignals);
-      
-      const wins = calculatedSignals.filter(s => s.result === 'WIN').length;
-      const total = calculatedSignals.length;
-      setStats({
-        totalTrades: total,
-        winrate: total > 0 ? parseFloat(((wins / total) * 100).toFixed(1)) : 0
-      });
+      if (data.values && data.values.length > 0) {
+        const formattedCandles: Candle[] = data.values.reverse().map((v: any) => {
+          // แปลงสตริงเวลาที่ได้มาเป็นโซนไทยแบบสมบูรณ์ (+07:00) เพื่อให้กราฟแสดงแกน X ตรงเป๊ะ
+          const thaiTimeStr = v.datetime.replace(' ', 'T') + '+07:00';
+          const exactTimestamp = new Date(thaiTimeStr).getTime() / 1000;
 
-      return newCandles;
-    });
-    
-    setSession(getThaiSession(Math.floor(Date.now() / 1000)));
+          return {
+            time: exactTimestamp,
+            open: parseFloat(v.open),
+            high: parseFloat(v.high),
+            low: parseFloat(v.low),
+            close: parseFloat(v.close),
+          };
+        });
+
+        const calculatedSignals = runStrategy(formattedCandles);
+        const currentSession = getThaiSession(Math.floor(Date.now() / 1000));
+        
+        const wins = calculatedSignals.filter(s => s.result === 'WIN').length;
+        const total = calculatedSignals.length;
+
+        setCandles(formattedCandles);
+        setSignals(calculatedSignals);
+        setSession(currentSession);
+        setStats({
+          totalTrades: total,
+          winrate: total > 0 ? parseFloat(((wins / total) * 100).toFixed(1)) : 0
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch market data:", error);
+    }
   };
 
   useEffect(() => {
-    updateMarket(true);
-    const quickInterval = setInterval(() => updateMarket(false), 2000); // อัปเดตราคาไหลลื่นทุก 2 วินาที
-    const fullRefresh = setInterval(() => updateMarket(true), 300000); // รีเซ็ตกราฟทุก 5 นาที
-    return () => {
-      clearInterval(quickInterval);
-      clearInterval(fullRefresh);
-    };
+    fetchRealData(); 
+    // อัปเดตทุกๆ 15 วินาที
+    const interval = setInterval(fetchRealData, 15000); 
+    return () => clearInterval(interval);
   }, []);
 
   return { candles, signals, stats, session };
