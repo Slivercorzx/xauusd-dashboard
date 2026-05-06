@@ -4,6 +4,9 @@ import { runStrategy, getThaiSession, Candle, Signal } from '../lib/strategy';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
+const CACHE_KEY_CANDLES = 'bright_trade_candles';
+const CACHE_KEY_TIME = 'bright_trade_last_fetch';
+
 export function useMarketData() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -20,8 +23,6 @@ export function useMarketData() {
   const currentKeyIndex = useRef(0);
   const SYMBOL = 'XAU/USD';
   const INTERVAL = '5min';
-
-  // อ้างอิงไปยังเอกสารบน Cloud Database (เราจะเก็บใน collection ชื่อ trading)
   const cloudDocRef = doc(db, 'trading', 'bright_stats');
 
   const updateStats = (allSignals: Signal[]) => {
@@ -33,8 +34,15 @@ export function useMarketData() {
     });
   };
 
-  // 1. โหลดข้อมูลจาก Cloud Database ทันทีที่เปิดเว็บ (มือถือ/คอม ข้อมูลตรงกัน)
+  // 1. โหลดข้อมูลตอนเปิดเว็บ (กราฟจากเครื่อง + ประวัติจาก Cloud)
   useEffect(() => {
+    // โหลดกราฟจาก Cache ให้เด้งขึ้นมาทันที
+    try {
+      const cachedCandles = localStorage.getItem(CACHE_KEY_CANDLES);
+      if (cachedCandles) setCandles(JSON.parse(cachedCandles));
+    } catch (e) { console.error("Cache load error", e); }
+
+    // โหลดประวัติออเดอร์จาก Firebase ให้ซิงค์ข้ามอุปกรณ์
     const loadCloudData = async () => {
       try {
         const docSnap = await getDoc(cloudDocRef);
@@ -45,15 +53,19 @@ export function useMarketData() {
             updateStats(cloudData.signals);
           }
         }
-      } catch (e) {
-        console.error("Firebase load error:", e);
-      }
+      } catch (e) { console.error("Firebase load error:", e); }
     };
     loadCloudData();
   }, []);
 
   const fetchRealData = async () => {
     try {
+      // 2. ระบบป้องกัน API ลิมิต (ใช้ Local Cache ถ้าเพิ่งดึงไม่ถึง 10 วิ)
+      const lastFetch = localStorage.getItem(CACHE_KEY_TIME);
+      if (lastFetch && Date.now() - parseInt(lastFetch) < 10000) {
+        return; 
+      }
+
       const currentKey = API_KEYS[currentKeyIndex.current];
       const response = await fetch(
         `https://api.twelvedata.com/time_series?symbol=${SYMBOL}&interval=${INTERVAL}&outputsize=300&apikey=${currentKey}&timezone=Asia/Bangkok`
@@ -78,10 +90,14 @@ export function useMarketData() {
           };
         });
 
+        // อัปเดต Cache กราฟลงเครื่อง
+        localStorage.setItem(CACHE_KEY_CANDLES, JSON.stringify(formattedCandles));
+        localStorage.setItem(CACHE_KEY_TIME, Date.now().toString());
+
         const calculatedSignals = runStrategy(formattedCandles);
         const currentSession = getThaiSession(Math.floor(Date.now() / 1000));
         
-        // 2. ดึงออเดอร์เก่าจาก Cloud มาผสมกับออเดอร์ใหม่
+        // ผสมออเดอร์เก่าจาก Cloud กับออเดอร์ใหม่
         let cloudSignals: Signal[] = [];
         try {
           const docSnap = await getDoc(cloudDocRef);
@@ -96,7 +112,7 @@ export function useMarketData() {
 
         const mergedSignals = Array.from(signalMap.values()).sort((a, b) => a.time - b.time);
 
-        // 3. เซฟกลับขึ้นไปเก็บบน Cloud Database 
+        // อัปเดตประวัติขึ้น Cloud Database
         await setDoc(cloudDocRef, { signals: mergedSignals }, { merge: true });
 
         setCandles(formattedCandles);
@@ -115,7 +131,6 @@ export function useMarketData() {
     return () => clearInterval(interval);
   }, []);
 
-  // ฟังก์ชันล้างประวัติ จะล้างข้อมูลบน Cloud ด้วย!
   const clearHistory = async () => {
     try {
       await setDoc(cloudDocRef, { signals: [] });
