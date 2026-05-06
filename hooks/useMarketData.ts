@@ -1,6 +1,8 @@
 // hooks/useMarketData.ts
 import { useState, useEffect, useRef } from 'react';
 import { runStrategy, getThaiSession, Candle, Signal } from '../lib/strategy';
+import { db } from '../lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export function useMarketData() {
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -19,11 +21,40 @@ export function useMarketData() {
   const SYMBOL = 'XAU/USD';
   const INTERVAL = '5min';
 
+  // อ้างอิงไปยังเอกสารบน Cloud Database (เราจะเก็บใน collection ชื่อ trading)
+  const cloudDocRef = doc(db, 'trading', 'bright_stats');
+
+  const updateStats = (allSignals: Signal[]) => {
+    const wins = allSignals.filter(s => s.result === 'WIN').length;
+    const total = allSignals.length;
+    setStats({
+      totalTrades: total,
+      winrate: total > 0 ? parseFloat(((wins / total) * 100).toFixed(1)) : 0
+    });
+  };
+
+  // 1. โหลดข้อมูลจาก Cloud Database ทันทีที่เปิดเว็บ (มือถือ/คอม ข้อมูลตรงกัน)
+  useEffect(() => {
+    const loadCloudData = async () => {
+      try {
+        const docSnap = await getDoc(cloudDocRef);
+        if (docSnap.exists()) {
+          const cloudData = docSnap.data();
+          if (cloudData.signals) {
+            setSignals(cloudData.signals);
+            updateStats(cloudData.signals);
+          }
+        }
+      } catch (e) {
+        console.error("Firebase load error:", e);
+      }
+    };
+    loadCloudData();
+  }, []);
+
   const fetchRealData = async () => {
     try {
       const currentKey = API_KEYS[currentKeyIndex.current];
-      
-      // อัปเดต: ดึงข้อมูลแค่ 300 แท่ง (เพียงพอสำหรับคำนวณ EMA 200 และประหยัด API)
       const response = await fetch(
         `https://api.twelvedata.com/time_series?symbol=${SYMBOL}&interval=${INTERVAL}&outputsize=300&apikey=${currentKey}&timezone=Asia/Bangkok`
       );
@@ -31,7 +62,6 @@ export function useMarketData() {
       const data = await response.json();
 
       if (data.status === 'error') {
-        console.warn(`⚠️ API Key ติดปัญหา -> สลับคีย์...`);
         currentKeyIndex.current = (currentKeyIndex.current + 1) % API_KEYS.length;
         return; 
       }
@@ -51,16 +81,28 @@ export function useMarketData() {
         const calculatedSignals = runStrategy(formattedCandles);
         const currentSession = getThaiSession(Math.floor(Date.now() / 1000));
         
-        const wins = calculatedSignals.filter(s => s.result === 'WIN').length;
-        const total = calculatedSignals.length;
+        // 2. ดึงออเดอร์เก่าจาก Cloud มาผสมกับออเดอร์ใหม่
+        let cloudSignals: Signal[] = [];
+        try {
+          const docSnap = await getDoc(cloudDocRef);
+          if (docSnap.exists() && docSnap.data().signals) {
+            cloudSignals = docSnap.data().signals;
+          }
+        } catch(e) {}
+
+        const signalMap = new Map();
+        cloudSignals.forEach(s => signalMap.set(s.time, s));
+        calculatedSignals.forEach(s => signalMap.set(s.time, s)); 
+
+        const mergedSignals = Array.from(signalMap.values()).sort((a, b) => a.time - b.time);
+
+        // 3. เซฟกลับขึ้นไปเก็บบน Cloud Database 
+        await setDoc(cloudDocRef, { signals: mergedSignals }, { merge: true });
 
         setCandles(formattedCandles);
-        setSignals(calculatedSignals);
+        setSignals(mergedSignals);
         setSession(currentSession);
-        setStats({
-          totalTrades: total,
-          winrate: total > 0 ? parseFloat(((wins / total) * 100).toFixed(1)) : 0
-        });
+        updateStats(mergedSignals);
       }
     } catch (error) {
       console.error("Failed to fetch data:", error);
@@ -73,5 +115,16 @@ export function useMarketData() {
     return () => clearInterval(interval);
   }, []);
 
-  return { candles, signals, stats, session };
+  // ฟังก์ชันล้างประวัติ จะล้างข้อมูลบน Cloud ด้วย!
+  const clearHistory = async () => {
+    try {
+      await setDoc(cloudDocRef, { signals: [] });
+      setSignals([]);
+      updateStats([]);
+    } catch (e) {
+      console.error("Failed to clear cloud history", e);
+    }
+  };
+
+  return { candles, signals, stats, session, clearHistory };
 }
