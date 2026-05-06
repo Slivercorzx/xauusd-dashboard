@@ -11,6 +11,7 @@ export function useMarketData() {
   const API_KEYS = [
     '38120619b69b4fc6af525768b0da4b72',
     '79996916dc9d45cbb3b97e10fc25a1b1',
+    '57e4098ca7174b30800b95f1e8998572',
     '650c6bef38664fe89c486ba99fb10b14'
   ];
   
