@@ -1,4 +1,5 @@
 // lib/indicators.ts
+// Standalone indicator functions (ใช้แยกจาก strategy.ts ได้)
 
 export function calculateEMA(data: number[], period: number): number[] {
   const k = 2 / (period + 1);
@@ -9,59 +10,102 @@ export function calculateEMA(data: number[], period: number): number[] {
   return ema;
 }
 
-export function calculateRSI(closes: number[], period: number = 14): number[] {
-  const rsi = new Array(closes.length).fill(0);
-  let gains = 0, losses = 0;
+export function calculateRSI(closes: number[], period = 14): number[] {
+  // ใช้ Wilder's RMA (เหมือน TradingView)
+  const alpha = 1 / period;
+  const gains = closes.map((c, i) => (i === 0 ? 0 : Math.max(c - closes[i - 1], 0)));
+  const losses = closes.map((c, i) => (i === 0 ? 0 : Math.max(closes[i - 1] - c, 0)));
 
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gains += diff;
-    else losses -= diff;
+  const avgGain: number[] = [gains[0]];
+  const avgLoss: number[] = [losses[0]];
+  for (let i = 1; i < closes.length; i++) {
+    avgGain.push(alpha * gains[i] + (1 - alpha) * avgGain[i - 1]);
+    avgLoss.push(alpha * losses[i] + (1 - alpha) * avgLoss[i - 1]);
   }
-  
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  rsi[period] = 100 - (100 / (1 + avgGain / avgLoss));
 
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    
-    avgGain = ((avgGain * (period - 1)) + gain) / period;
-    avgLoss = ((avgLoss * (period - 1)) + loss) / period;
-    
-    rsi[i] = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
-  }
-  return rsi;
+  return avgGain.map((ag, i) =>
+    avgLoss[i] === 0 ? 100 : 100 - 100 / (1 + ag / avgLoss[i])
+  );
 }
 
-export function calculateATR(highs: number[], lows: number[], closes: number[], period: number = 14): number[] {
-  const tr = [highs[0] - lows[0]];
+export function calculateATR(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 14
+): number[] {
+  const tr = highs.map((h, i) =>
+    i === 0
+      ? h - lows[i]
+      : Math.max(h - lows[i], Math.abs(h - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]))
+  );
+
+  const alpha = 1 / period;
+  const atr: number[] = [tr[0]];
   for (let i = 1; i < highs.length; i++) {
-    const hl = highs[i] - lows[i];
-    const hc = Math.abs(highs[i] - closes[i - 1]);
-    const lc = Math.abs(lows[i] - closes[i - 1]);
-    tr.push(Math.max(hl, hc, lc));
-  }
-  
-  const atr = new Array(highs.length).fill(0);
-  atr[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  
-  for (let i = period; i < highs.length; i++) {
-    atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+    atr.push(alpha * tr[i] + (1 - alpha) * atr[i - 1]);
   }
   return atr;
 }
 
-export function calculateADX(highs: number[], lows: number[], closes: number[], period: number = 14): number[] {
-  // Simplified ADX approximation for performance in JS
-  // In production, this uses the Wilder's Smoothing for +DI / -DI
-  const adx = new Array(closes.length).fill(0);
-  for (let i = period * 2; i < closes.length; i++) {
-    // Mocking ADX volatility calculation for structural completeness
-    // Replace with full Wilder's TR/+DM/-DM logic if strictly needed
-    adx[i] = 20 + Math.random() * 15; // Range ~20-35
+// ─── ADX ที่แท้จริง (Wilder's Smoothing) ───────────────────────────────────
+// ลบ Math.random() ออก และใช้การคำนวณที่ถูกต้อง
+export function calculateADX(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 14
+): number[] {
+  const alpha = 1 / period;
+  const len = highs.length;
+
+  // True Range
+  const tr = highs.map((h, i) =>
+    i === 0
+      ? h - lows[i]
+      : Math.max(h - lows[i], Math.abs(h - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]))
+  );
+
+  // Directional Movement
+  const plusDM = highs.map((h, i) => {
+    if (i === 0) return 0;
+    const up = h - highs[i - 1];
+    const down = lows[i - 1] - lows[i];
+    return up > down && up > 0 ? up : 0;
+  });
+  const minusDM = lows.map((l, i) => {
+    if (i === 0) return 0;
+    const up = highs[i] - highs[i - 1];
+    const down = lows[i - 1] - l;
+    return down > up && down > 0 ? down : 0;
+  });
+
+  // Wilder's RMA
+  const smoothTR: number[] = [tr[0]];
+  const smoothPlusDM: number[] = [plusDM[0]];
+  const smoothMinusDM: number[] = [minusDM[0]];
+  for (let i = 1; i < len; i++) {
+    smoothTR.push(alpha * tr[i] + (1 - alpha) * smoothTR[i - 1]);
+    smoothPlusDM.push(alpha * plusDM[i] + (1 - alpha) * smoothPlusDM[i - 1]);
+    smoothMinusDM.push(alpha * minusDM[i] + (1 - alpha) * smoothMinusDM[i - 1]);
   }
+
+  const plusDI = smoothPlusDM.map((p, i) =>
+    smoothTR[i] === 0 ? 0 : (100 * p) / smoothTR[i]
+  );
+  const minusDI = smoothMinusDM.map((m, i) =>
+    smoothTR[i] === 0 ? 0 : (100 * m) / smoothTR[i]
+  );
+
+  const dx = plusDI.map((p, i) =>
+    p + minusDI[i] === 0 ? 0 : (100 * Math.abs(p - minusDI[i])) / (p + minusDI[i])
+  );
+
+  // Smooth DX → ADX
+  const adx: number[] = [dx[0]];
+  for (let i = 1; i < len; i++) {
+    adx.push(alpha * dx[i] + (1 - alpha) * adx[i - 1]);
+  }
+
   return adx;
 }
